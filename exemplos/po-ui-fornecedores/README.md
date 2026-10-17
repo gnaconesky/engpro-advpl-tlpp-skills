@@ -106,6 +106,11 @@ que você vai substituir a seguir.
 2. **Copie** todo o conteúdo da pasta `frontend/` deste exemplo para dentro de
    `fornecedores-app/`, substituindo o que já existir:
 
+   Use o terminal (no Mac/Linux: `cp -R caminho/do/exemplo/frontend/. .`). O Finder do
+   Mac e o Explorer, ao "substituir" a pasta `src`, apagam os arquivos que não vieram
+   na cópia. Se isso acontecer, o `ng serve` reclama de `main.ts` e `styles.css`; este
+   exemplo já traz esses arquivos para essa cópia não quebrar o projeto.
+
    ```
    fornecedores-app/
    ├── proxy.conf.json                       ← repassa /rest para o AppServer
