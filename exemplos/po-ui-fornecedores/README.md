@@ -5,7 +5,7 @@ inclui, altera e exclui fornecedores do Protheus.
 
 ```
  Navegador (Angular + PO-UI)  ──HTTP/JSON──►  AppServer REST  ──►  MATA020 (MVC)  ──►  SA2
-   localhost:4200                              :8080/rest/custom/v1/fornecedores
+   localhost:4200                              :4004/rest/custom/v1/fornecedores
 ```
 
 - **Protheus**: uma API REST em TLPP (`protheus/fornecedores.api.tlpp`). As gravações
@@ -54,6 +54,11 @@ inclui, altera e exclui fornecedores do Protheus.
    O `:id` é `A2_COD + A2_LOJA` com o tamanho do dicionário (ex.: `00000101`).
 
 ### 2.2 Ligar o servidor REST
+> **Já tem um REST rodando** (ex.: na porta 4004, com outras APIs)? Use o mesmo e pule
+> este passo. A API nova entra no mesmo servidor: basta compilar e reiniciar o AppServer.
+> Só confira o prefixo da URL (chave `URL=` da seção de URI no `appserver.ini`, ex.: `/rest`).
+> Se for diferente de `/rest`, troque-o em `environment.ts` e em `proxy.conf.json`.
+
 1. Faça backup do `appserver.ini`.
 2. Acrescente as seções de `protheus/appserver.ini.exemplo`, ajustando:
    - `Port`: porta livre (no exemplo, `8080`);
@@ -66,7 +71,7 @@ Teste sempre a API isolada primeiro. Se ela não funcionar, a tela também não 
 
 ```bash
 # troque admin:123 por um usuario do Protheus e 99,01 por empresa,filial
-curl -u admin:123 -H "tenantId: 99,01" "http://localhost:8080/rest/custom/v1/fornecedores?pageSize=5"
+curl -u admin:123 -H "tenantId: 99,01" "http://localhost:4004/rest/custom/v1/fornecedores?pageSize=5"
 ```
 A resposta esperada é:
 ```json
@@ -124,7 +129,7 @@ que você vai substituir a seguir.
 
 ### 3.4 Ajustar para o seu ambiente
 1. **`proxy.conf.json`**: em `target`, coloque o endereço do REST
-   (ex.: `http://192.168.0.10:8080`). O proxy evita problemas de CORS em desenvolvimento.
+   (ex.: `http://192.168.0.10:4004`). O proxy evita problemas de CORS em desenvolvimento.
 2. **`src/environments/environment.ts`**: em `tenantId`, coloque `empresa,filial`
    (ex.: `'01,0101'`).
 3. **`angular.json`**: o PO-UI é maior que o limite padrão do Angular. Procure
