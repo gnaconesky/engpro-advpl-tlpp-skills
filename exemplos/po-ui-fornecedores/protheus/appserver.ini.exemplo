@@ -1,0 +1,35 @@
+; Trecho para ADICIONAR ao appserver.ini existente (nao substitua o arquivo).
+; Ajuste porta, environment e origem do CORS ao seu ambiente.
+; Este e o REST do Framework Protheus (HTTPV11 + PrepareIn), o mesmo usado
+; pelas skills deste repositorio. Se apos reiniciar o AppServer as rotas
+; nao aparecerem em http://localhost:8080/rest/swagger, confira na TDN a
+; pagina "tlppCore - REST - Configuracao" para a versao do seu binario.
+
+[HTTPV11]
+Enable=1
+Sockets=HTTPREST
+
+[HTTPREST]
+Port=8080
+IPsBind=
+URIs=HTTPURI
+Security=1
+
+[HTTPURI]
+URL=/rest
+; Environment do seu appserver.ini (ex.: P12, PROTHEUS, ENVIRONMENT)
+PrepareIn=ALL
+Instances=1,2
+; Em desenvolvimento, o Angular roda em http://localhost:4200.
+; Usando o proxy do Angular (proxy.conf.json) o CORS nem e acionado,
+; mas deixe a origem liberada se for chamar a API direto do navegador.
+CORSEnable=1
+AllowOrigin=http://localhost:4200
+
+[ONSTART]
+JOBS=HTTPJOB
+RefreshRate=120
+
+[HTTPJOB]
+MAIN=HTTP_START
+ENVIRONMENT=P12

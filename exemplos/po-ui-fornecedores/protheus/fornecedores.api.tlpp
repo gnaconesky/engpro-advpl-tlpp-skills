@@ -1,0 +1,310 @@
+#include "tlpp-core.th"
+#include "totvs.ch"
+#include "fwmvcdef.ch"
+
+Namespace custom.fornecedores
+
+//-------------------------------------------------------------------
+// API REST de Fornecedores (SA2) consumida pela tela PO-UI.
+//
+// Rotas (base: http://<servidor>:<porta>/rest):
+//   GET    /custom/v1/fornecedores            lista paginada (page, pageSize, search)
+//   GET    /custom/v1/fornecedores/:id        um fornecedor
+//   POST   /custom/v1/fornecedores            inclui
+//   PUT    /custom/v1/fornecedores/:id        altera
+//   DELETE /custom/v1/fornecedores/:id        exclui
+//
+// :id = A2_COD + A2_LOJA com o tamanho do dicionario (ex.: "00000101").
+// Empresa/filial vem do header "tenantId" (ex.: "99,01") via PrepareIn.
+// Gravacoes passam pelo modelo MVC do MATA020, entao todas as
+// validacoes e gatilhos do cadastro padrao sao respeitados.
+//-------------------------------------------------------------------
+
+//-------------------------------------------------------------------
+// GET /custom/v1/fornecedores
+//-------------------------------------------------------------------
+@Get(endpoint="/custom/v1/fornecedores", description="Lista fornecedores com paginacao")
+User Function listFornecedores() as Logical
+  Local jQuery     := oRest:getQueryRequest() as Json
+  Local nPage      := 1 as Numeric
+  Local nPageSize  := 20 as Numeric
+  Local cSearch    := "" as Character
+  Local cQuery     := "" as Character
+  Local cAlias     := "" as Character
+  Local oStatement as Object
+  Local aItems     := {} as Array
+  Local lHasNext   := .F. as Logical
+  Local nSkip      := 0 as Numeric
+  Local jResponse  := JsonObject():New() as Json
+
+  If jQuery <> Nil
+    If jQuery:HasProperty("page")
+      nPage := Max(Val(cValToChar(jQuery["page"])), 1)
+    EndIf
+    If jQuery:HasProperty("pageSize")
+      nPageSize := Min(Max(Val(cValToChar(jQuery["pageSize"])), 1), 100)
+    EndIf
+    If jQuery:HasProperty("search")
+      cSearch := AllTrim(Upper(cValToChar(jQuery["search"])))
+    EndIf
+  EndIf
+
+  cQuery := "SELECT A2_COD, A2_LOJA, A2_NOME, A2_NREDUZ, A2_TIPO, A2_CGC, "
+  cQuery += "A2_END, A2_COD_MUN, A2_MUN, A2_EST, A2_EMAIL, A2_TEL, A2_MSBLQL "
+  cQuery += "FROM " + RetSQLName("SA2") + " SA2 "
+  cQuery += "WHERE SA2.D_E_L_E_T_ = ' ' "
+  cQuery += "AND SA2.A2_FILIAL = ? "
+  If !Empty(cSearch)
+    cQuery += "AND (SA2.A2_NOME LIKE ? OR SA2.A2_COD LIKE ? OR SA2.A2_CGC LIKE ?) "
+  EndIf
+  cQuery += "ORDER BY SA2.A2_COD, SA2.A2_LOJA"
+
+  Try
+    oStatement := FWExecStatement():New(ChangeQuery(cQuery))
+    oStatement:SetString(1, FWxFilial("SA2"))
+    If !Empty(cSearch)
+      oStatement:SetString(2, "%" + cSearch + "%")
+      oStatement:SetString(3, "%" + cSearch + "%")
+      oStatement:SetString(4, "%" + cSearch + "%")
+    EndIf
+    cAlias := oStatement:OpenAlias()
+
+    // Paginacao portavel entre bancos: pula as paginas anteriores.
+    // Para tabelas muito grandes, troque por OFFSET/FETCH do seu banco.
+    While nSkip < (nPage - 1) * nPageSize .And. !(cAlias)->(Eof())
+      (cAlias)->(DBSkip())
+      nSkip++
+    EndDo
+
+    While !(cAlias)->(Eof()) .And. Len(aItems) < nPageSize
+      aAdd(aItems, FornecedorToJson(cAlias))
+      (cAlias)->(DBSkip())
+    EndDo
+
+    lHasNext := !(cAlias)->(Eof())
+    (cAlias)->(DBCloseArea())
+    oStatement:Destroy()
+  Catch oError
+    If !Empty(cAlias) .And. Select(cAlias) > 0
+      (cAlias)->(DBCloseArea())
+    EndIf
+    FWLogMsg("ERROR", , "REST", "listFornecedores", , "01", oError:Description, 0, 0, {})
+    Return oRest:setStatusResponse(500, BuildError("500", "Erro ao listar fornecedores", oError:Description))
+  EndTry
+
+  jResponse["hasNext"] := lHasNext
+  jResponse["items"]   := aItems
+
+  oRest:setKeyHeaderResponse("Content-Type", "application/json")
+Return oRest:setStatusResponse(200, jResponse:toJson())
+
+//-------------------------------------------------------------------
+// GET /custom/v1/fornecedores/:id
+//-------------------------------------------------------------------
+@Get(endpoint="/custom/v1/fornecedores/:id", description="Retorna um fornecedor")
+User Function getFornecedor() as Logical
+  Local jParams := oRest:getPathParamsRequest() as Json
+  Local cId     := jParams["id"] as Character
+
+  If !PosicionaSA2(cId)
+    Return oRest:setStatusResponse(404, BuildError("404", "Fornecedor nao encontrado", "Id: " + cId))
+  EndIf
+
+  oRest:setKeyHeaderResponse("Content-Type", "application/json")
+Return oRest:setStatusResponse(200, FornecedorToJson("SA2"):toJson())
+
+//-------------------------------------------------------------------
+// POST /custom/v1/fornecedores
+//-------------------------------------------------------------------
+@Post(endpoint="/custom/v1/fornecedores", description="Inclui um fornecedor")
+User Function createFornecedor() as Logical
+  Local jBody   := JsonObject():New() as Json
+  Local cResult := "" as Character
+
+  If jBody:fromJson(oRest:getBodyRequest()) <> Nil
+    Return oRest:setStatusResponse(400, BuildError("400", "JSON invalido", "Corpo da requisicao nao e um JSON valido"))
+  EndIf
+
+  cResult := GravaFornecedor(MODEL_OPERATION_INSERT, jBody)
+  If !Empty(cResult)
+    Return oRest:setStatusResponse(400, BuildError("400", cResult, cResult))
+  EndIf
+
+  oRest:setKeyHeaderResponse("Content-Type", "application/json")
+Return oRest:setStatusResponse(201, FornecedorToJson("SA2"):toJson())
+
+//-------------------------------------------------------------------
+// PUT /custom/v1/fornecedores/:id
+//-------------------------------------------------------------------
+@Put(endpoint="/custom/v1/fornecedores/:id", description="Altera um fornecedor")
+User Function updateFornecedor() as Logical
+  Local jParams := oRest:getPathParamsRequest() as Json
+  Local cId     := jParams["id"] as Character
+  Local jBody   := JsonObject():New() as Json
+  Local cResult := "" as Character
+
+  If jBody:fromJson(oRest:getBodyRequest()) <> Nil
+    Return oRest:setStatusResponse(400, BuildError("400", "JSON invalido", "Corpo da requisicao nao e um JSON valido"))
+  EndIf
+
+  If !PosicionaSA2(cId)
+    Return oRest:setStatusResponse(404, BuildError("404", "Fornecedor nao encontrado", "Id: " + cId))
+  EndIf
+
+  cResult := GravaFornecedor(MODEL_OPERATION_UPDATE, jBody)
+  If !Empty(cResult)
+    Return oRest:setStatusResponse(400, BuildError("400", cResult, cResult))
+  EndIf
+
+  oRest:setKeyHeaderResponse("Content-Type", "application/json")
+Return oRest:setStatusResponse(200, FornecedorToJson("SA2"):toJson())
+
+//-------------------------------------------------------------------
+// DELETE /custom/v1/fornecedores/:id
+//-------------------------------------------------------------------
+@Delete(endpoint="/custom/v1/fornecedores/:id", description="Exclui um fornecedor")
+User Function deleteFornecedor() as Logical
+  Local jParams := oRest:getPathParamsRequest() as Json
+  Local cId     := jParams["id"] as Character
+  Local cResult := "" as Character
+
+  If !PosicionaSA2(cId)
+    Return oRest:setStatusResponse(404, BuildError("404", "Fornecedor nao encontrado", "Id: " + cId))
+  EndIf
+
+  cResult := GravaFornecedor(MODEL_OPERATION_DELETE, JsonObject():New())
+  If !Empty(cResult)
+    Return oRest:setStatusResponse(400, BuildError("400", cResult, cResult))
+  EndIf
+
+Return oRest:setStatusResponse(204, "")
+
+//-------------------------------------------------------------------
+// Executa inclusao/alteracao/exclusao pelo modelo MVC MATA020.
+// Retorna "" em caso de sucesso ou a mensagem de erro do modelo.
+// Para UPDATE/DELETE o SA2 ja deve estar posicionado.
+//-------------------------------------------------------------------
+Static Function GravaFornecedor(nOperation as Numeric, jBody as Json) as Character
+  Local oModel  as Object
+  Local oMaster as Object
+  Local aErro   := {} as Array
+  Local cErro   := "" as Character
+  Local aCampos := {} as Array
+  Local lOk     := .T. as Logical
+  Local nI      := 0 as Numeric
+
+  Try
+    oModel := FWLoadModel("MATA020")
+    oModel:SetOperation(nOperation)
+    oModel:Activate()
+
+    lOk := .T.
+    If nOperation <> MODEL_OPERATION_DELETE
+      oMaster := oModel:GetModel("SA2MASTER")
+      // A ordem importa: UF e codigo IBGE disparam gatilhos (ex.: A2_MUN)
+      aCampos := { ;
+        {"A2_COD", "codigo"}, {"A2_LOJA", "loja"}, {"A2_NOME", "nome"}, ;
+        {"A2_NREDUZ", "nomeFantasia"}, {"A2_TIPO", "tipo"}, {"A2_CGC", "cnpjCpf"}, ;
+        {"A2_END", "endereco"}, {"A2_EST", "estado"}, {"A2_COD_MUN", "codMunicipio"}, ;
+        {"A2_MUN", "municipio"}, {"A2_EMAIL", "email"}, {"A2_TEL", "telefone"}, ;
+        {"A2_MSBLQL", "bloqueado"} }
+
+      For nI := 1 To Len(aCampos)
+        // Chave so e informada na inclusao (na alteracao nao e editavel)
+        If nOperation == MODEL_OPERATION_UPDATE .And. aCampos[nI][1] $ "A2_COD|A2_LOJA"
+          Loop
+        EndIf
+        If !SetCampo(oMaster, aCampos[nI][1], jBody, aCampos[nI][2], nOperation)
+          lOk := .F.
+          Exit
+        EndIf
+      Next nI
+    EndIf
+
+    If !lOk .Or. !(oModel:VldData() .And. oModel:CommitData())
+      aErro := oModel:GetErrorMessage()
+      // [4] campo com erro, [6] mensagem, [7] solucao
+      cErro := AllTrim(cValToChar(aErro[6]))
+      If !Empty(aErro[4])
+        cErro += " (campo " + AllTrim(cValToChar(aErro[4])) + ")"
+      EndIf
+      If Empty(cErro)
+        cErro := "Nao foi possivel gravar o fornecedor"
+      EndIf
+    EndIf
+
+    oModel:DeActivate()
+    oModel:Destroy()
+  Catch oError
+    cErro := oError:Description
+    FWLogMsg("ERROR", , "REST", "GravaFornecedor", , "01", cErro, 0, 0, {})
+  EndTry
+
+Return cErro
+
+//-------------------------------------------------------------------
+// Atribui no modelo apenas as propriedades enviadas no JSON.
+// Na inclusao, valores vazios sao ignorados para manter o
+// inicializador padrao do dicionario (ex.: numeracao do A2_COD).
+//-------------------------------------------------------------------
+Static Function SetCampo(oMaster as Object, cCampo as Character, jBody as Json, cProp as Character, nOperation as Numeric) as Logical
+  Local cValor := "" as Character
+
+  If !jBody:HasProperty(cProp)
+    Return .T.
+  EndIf
+
+  cValor := AllTrim(cValToChar(jBody[cProp]))
+  If Empty(cValor) .And. nOperation == MODEL_OPERATION_INSERT
+    Return .T.
+  EndIf
+
+Return oMaster:SetValue(cCampo, PadR(cValor, TamSX3(cCampo)[1]))
+
+//-------------------------------------------------------------------
+// Posiciona o SA2 a partir do id (A2_COD + A2_LOJA).
+//-------------------------------------------------------------------
+Static Function PosicionaSA2(cId as Character) as Logical
+  Local nTamCod := TamSX3("A2_COD")[1] as Numeric
+  Local nTamLoj := TamSX3("A2_LOJA")[1] as Numeric
+  Local cCod    := PadR(SubStr(cId, 1, nTamCod), nTamCod) as Character
+  Local cLoja   := PadR(SubStr(cId, nTamCod + 1, nTamLoj), nTamLoj) as Character
+
+  DbSelectArea("SA2")
+  SA2->(DbSetOrder(1)) // A2_FILIAL + A2_COD + A2_LOJA
+Return SA2->(DbSeek(FWxFilial("SA2") + cCod + cLoja))
+
+//-------------------------------------------------------------------
+// Monta o JSON do fornecedor a partir do alias (SA2 ou query).
+//-------------------------------------------------------------------
+Static Function FornecedorToJson(cAlias as Character) as Json
+  Local jItem := JsonObject():New() as Json
+
+  jItem["id"]           := (cAlias)->A2_COD + (cAlias)->A2_LOJA
+  jItem["codigo"]       := AllTrim((cAlias)->A2_COD)
+  jItem["loja"]         := AllTrim((cAlias)->A2_LOJA)
+  jItem["nome"]         := AllTrim((cAlias)->A2_NOME)
+  jItem["nomeFantasia"] := AllTrim((cAlias)->A2_NREDUZ)
+  jItem["tipo"]         := AllTrim((cAlias)->A2_TIPO)
+  jItem["cnpjCpf"]      := AllTrim((cAlias)->A2_CGC)
+  jItem["endereco"]     := AllTrim((cAlias)->A2_END)
+  jItem["codMunicipio"] := AllTrim((cAlias)->A2_COD_MUN)
+  jItem["municipio"]    := AllTrim((cAlias)->A2_MUN)
+  jItem["estado"]       := AllTrim((cAlias)->A2_EST)
+  jItem["email"]        := AllTrim((cAlias)->A2_EMAIL)
+  jItem["telefone"]     := AllTrim((cAlias)->A2_TEL)
+  jItem["bloqueado"]    := AllTrim((cAlias)->A2_MSBLQL)
+
+Return jItem
+
+//-------------------------------------------------------------------
+// Erro no padrao TTALK. O PO-UI exibe o campo "message" automaticamente.
+//-------------------------------------------------------------------
+Static Function BuildError(cCode as Character, cMessage as Character, cDetail as Character) as Character
+  Local jError := JsonObject():New() as Json
+
+  jError["code"]            := cCode
+  jError["message"]         := cMessage
+  jError["detailedMessage"] := cDetail
+
+Return jError:toJson()
