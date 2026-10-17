@@ -1,0 +1,8 @@
+{
+  "name": "fornecedores",
+  "version": "1.0.0",
+  "productLine": "Protheus",
+  "serverBackend": "",
+  "restEntryPoint": "",
+  "api_baseUrl": "/rest"
+}

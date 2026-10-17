@@ -96,6 +96,7 @@ Se perguntar sobre *analytics*, responda **N**.
 ```bash
 ng add @po-ui/ng-components@19
 npm install @po-ui/ng-templates@19
+npm install @totvs/protheus-lib-core@19 @totvs/po-theme@19 @totvs/common-assets subsink rxjs-compat
 ```
 O `ng add` já instala o tema visual do PO-UI no `angular.json` e cria uma tela de exemplo,
 que você vai substituir a seguir.
@@ -184,22 +185,59 @@ Dicas:
 
 ---
 
-## Parte 5 — Publicar
+## Parte 5 — Abrir dentro do Protheus (FwCallApp)
 
+O mesmo app roda nos dois modos, sem mudar código:
+
+| | No navegador (`npm start`) | Dentro do Protheus (`FwCallApp`) |
+|---|---|---|
+| Login | Tela de login do exemplo (Basic) | O do próprio Protheus (token automático) |
+| Empresa/filial | `tenantId` do `environment.ts` | A empresa/filial logada |
+| Endereço do REST | `api_baseUrl` do `appConfig.json` + proxy | Informado pelo Protheus |
+| Botão da barra | Sair | Fechar (volta ao menu) |
+
+Quem faz essa troca é a biblioteca **`@totvs/protheus-lib-core`** (instalada no passo 3.2),
+carregada em `app.config.ts`. A configuração do modo navegador fica em
+`public/assets/data/appConfig.json`.
+
+### 5.1 Gerar o pacote `.app`
+Na raiz do projeto Angular:
 ```bash
-ng build
+sh empacotar-protheus.sh
 ```
-Os arquivos ficam em `dist/fornecedores-app/browser`. Há dois caminhos:
+O script roda `ng build --base-href ./` e compacta o conteúdo de
+`dist/fornecedores-app/browser` em **`fornecedores.app`** (um `.zip` com outra extensão).
+O nome do arquivo é o nome do app que o `FwCallApp` vai abrir.
 
-1. **Dentro do Protheus (recomendado)**: compacte o build como `.app`, compile no RPO e
-   abra pelo menu com `FwCallApp("fornecedores-app")`. Nesse modo o app recebe o login e
-   a empresa do próprio SmartClient, usando a biblioteca `@totvs/protheus-lib-core` no
-   lugar do login deste exemplo. Veja os pré-requisitos na TDN em **"FwCallApp"**
-   (versão de lib, `App_Environment` e WebApp configurados).
-2. **Servidor web próprio** (IIS, Nginx etc.): sirva a pasta do build e configure o
-   proxy `/rest` para o AppServer, como o `proxy.conf.json` faz em desenvolvimento.
-   Para esse caso, troque a autenticação Basic por **OAuth2**
-   (`POST /rest/api/oauth2/v1/token`).
+### 5.2 Compilar no RPO
+1. No VS Code, conectado ao AppServer, compile **`fornecedores.app`** junto com
+   **`protheus/FORNPOUI.prw`** (selecione os dois arquivos > *Compile*). O `.app` entra no
+   RPO como recurso.
+2. Não é preciso reiniciar o AppServer para atualizar o `.app`; basta recompilar.
+
+### 5.3 Colocar no menu
+1. Configurador (SIGACFG) > Ambiente > Cadastros > Menus.
+2. Abra o menu do módulo desejado (ex.: Compras) e adicione um item com a função
+   **`U_FORNPOUI`**.
+3. Entre no módulo pelo SmartClient ou pelo WebApp e chame a rotina. A tela abre já
+   autenticada, com a empresa e a filial da sessão.
+
+### 5.4 Pré-requisitos e conferência
+- O `FwCallApp` usa o **REST do próprio AppServer** para servir o app e as APIs. No seu
+  caso é o REST da porta 4004, que já atende a API de fornecedores.
+- Em **Docker**, o endereço do REST que o Protheus informa ao app é o de dentro do
+  contêiner. Se a porta publicada for diferente da interna (ex.: `-p 4004:8080`), o app
+  não encontra a API. Use a mesma porta dos dois lados (`-p 4004:4004`).
+- A lib e o binário do Protheus precisam ser recentes o bastante para o `FwCallApp`;
+  confira a página **"FwCallApp - Abrindo aplicativos Web no Protheus"** na TDN.
+
+### 5.5 Atualizar a tela depois
+Altere o código, rode `sh empacotar-protheus.sh` de novo e recompile o `fornecedores.app`.
+Para desenvolver, continue usando `npm start`, que é mais rápido.
+
+### Alternativa: servidor web próprio
+Também é possível servir a pasta do build num IIS/Nginx com proxy `/rest` para o AppServer.
+Nesse caso, troque a autenticação Basic por **OAuth2** (`POST /rest/api/oauth2/v1/token`).
 
 ---
 
@@ -213,4 +251,6 @@ Os arquivos ficam em `dist/fornecedores-app/browser`. Há dois caminhos:
 | `Budget ... was not met` no build | Faltou aumentar os budgets no `angular.json` (passo 3.4) |
 | Lista vazia, mas existem fornecedores | `tenantId` aponta para outra empresa/filial |
 | Erro citando `SA2MASTER` | O ID do submodelo do MATA020 é diferente na sua release; confira em `ModelDef` |
+| `FwCallApp` abre tela em branco | O `.app` foi gerado sem `--base-href ./` (use o `empacotar-protheus.sh`) ou o nome do `.app` difere do usado no `FwCallApp` |
+| Dentro do Protheus a lista dá erro 404/conexão | REST do AppServer diferente do que atende a API, ou porta do Docker mapeada para outro número |
 | Telas em inglês ("Save", "Cancel") | O PO-UI segue o idioma do navegador; em um navegador pt-BR aparecem em português |

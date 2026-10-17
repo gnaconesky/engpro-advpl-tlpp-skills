@@ -1,14 +1,23 @@
-import { Injectable } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
+import { ProAppConfigService } from '@totvs/protheus-lib-core';
 
 const TOKEN_KEY = 'protheus_basic_token';
 
 /**
- * Autenticacao Basic simples para desenvolvimento.
- * As credenciais ficam so no sessionStorage do navegador (somem ao fechar a aba).
- * Em producao prefira OAuth2 (/api/oauth2/v1/token) ou o app embarcado via FwCallApp.
+ * Dentro do Protheus (FwCallApp) o login e do proprio Protheus: o protheus-lib-core
+ * envia o token do usuario logado e a empresa/filial em toda requisicao.
+ *
+ * No navegador (npm start) usamos autenticacao Basic so para desenvolvimento.
+ * As credenciais ficam no sessionStorage do navegador (somem ao fechar a aba).
  */
 @Injectable({ providedIn: 'root' })
 export class AuthService {
+  private readonly proAppConfig = inject(ProAppConfigService);
+
+  insideProtheus(): boolean {
+    return this.proAppConfig.insideProtheus();
+  }
+
   login(usuario: string, senha: string): void {
     sessionStorage.setItem(TOKEN_KEY, btoa(`${usuario}:${senha}`));
   }
@@ -22,6 +31,11 @@ export class AuthService {
   }
 
   isLoggedIn(): boolean {
-    return !!this.getToken();
+    return this.insideProtheus() || !!this.getToken();
+  }
+
+  /** Fecha o app e volta para o menu do Protheus. */
+  fecharApp(): void {
+    this.proAppConfig.callAppClose();
   }
 }

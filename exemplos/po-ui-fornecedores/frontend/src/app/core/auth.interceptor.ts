@@ -6,12 +6,19 @@ import { catchError, throwError } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { AuthService } from './auth.service';
 
-/** Adiciona Authorization e tenantId em toda chamada ao Protheus. */
+/**
+ * So atua no navegador: adiciona Authorization (Basic) e tenantId.
+ * Dentro do Protheus quem faz isso e o protheus-lib-core.
+ */
 export const authInterceptor: HttpInterceptorFn = (req, next) => {
   const auth = inject(AuthService);
   const router = inject(Router);
-  const token = auth.getToken();
 
+  if (auth.insideProtheus() || req.url.includes('assets/')) {
+    return next(req);
+  }
+
+  const token = auth.getToken();
   const request = token
     ? req.clone({ setHeaders: { Authorization: `Basic ${token}`, tenantId: environment.tenantId } })
     : req;

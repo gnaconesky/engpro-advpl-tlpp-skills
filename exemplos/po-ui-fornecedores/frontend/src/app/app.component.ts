@@ -28,8 +28,11 @@ export class AppComponent {
     { label: 'Fornecedores', link: '/fornecedores', icon: 'an an-truck', shortLabel: 'Fornec.' }
   ];
 
+  // Dentro do Protheus o botao fecha o app e volta ao menu; no navegador faz logout
   readonly toolbarActions: PoToolbarAction[] = [
-    { label: 'Sair', icon: 'an an-sign-out', action: () => this.logout() }
+    this.auth.insideProtheus()
+      ? { label: 'Fechar', icon: 'an an-x', action: () => this.auth.fecharApp() }
+      : { label: 'Sair', icon: 'an an-sign-out', action: () => this.logout() }
   ];
 
   private logout(): void {
