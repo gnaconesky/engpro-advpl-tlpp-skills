@@ -10,6 +10,9 @@ import {
   PoTableColumn
 } from '@po-ui/ng-components';
 
+import { HttpErrorResponse } from '@angular/common/http';
+
+import { mensagemErroSemCorpo } from '../core/http-error';
 import { Fornecedor } from './fornecedor.model';
 import { FornecedoresService } from './fornecedores.service';
 
@@ -102,8 +105,18 @@ export class FornecedorListComponent implements OnInit {
         this.hasNext = resp.hasNext;
         this.loading = false;
       },
-      error: () => (this.loading = false)
+      error: (error: HttpErrorResponse) => {
+        this.loading = false;
+        this.notificarErro(error);
+      }
     });
+  }
+
+  private notificarErro(error: HttpErrorResponse): void {
+    const mensagem = mensagemErroSemCorpo(error);
+    if (mensagem) {
+      this.notification.error(mensagem);
+    }
   }
 
   private confirmarExclusao(f: Fornecedor): void {

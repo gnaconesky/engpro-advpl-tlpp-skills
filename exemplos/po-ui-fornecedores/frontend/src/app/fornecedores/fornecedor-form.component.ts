@@ -3,6 +3,9 @@ import { NgForm } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { ForceOptionComponentEnum, PoDynamicFormField, PoModule, PoNotificationService } from '@po-ui/ng-components';
 
+import { HttpErrorResponse } from '@angular/common/http';
+
+import { mensagemErroSemCorpo } from '../core/http-error';
 import { Fornecedor } from './fornecedor.model';
 import { FornecedoresService } from './fornecedores.service';
 
@@ -59,8 +62,15 @@ export class FornecedorFormComponent implements OnInit {
         this.notification.success('Fornecedor salvo com sucesso.');
         this.voltar();
       },
-      // A mensagem de erro do Protheus (campo "message") ja e exibida pelo interceptor do PO-UI
-      error: () => (this.saving = false)
+      // A mensagem do Protheus (campo "message") ja e exibida pelo interceptor do PO-UI;
+      // aqui cobrimos os erros sem corpo (sem conexao, 401, 404...)
+      error: (error: HttpErrorResponse) => {
+        this.saving = false;
+        const mensagem = mensagemErroSemCorpo(error);
+        if (mensagem) {
+          this.notification.error(mensagem);
+        }
+      }
     });
   }
 
