@@ -5,6 +5,7 @@ set -e
 npx ng build --base-href ./
 rm -f fornecedores.app
 cd dist/fornecedores-app/browser
-zip -r ../../../fornecedores.app .
+# -X sem atributos extras do macOS, -D sem entradas de diretorio (zip "limpo" para o Protheus)
+zip -r -X -D ../../../fornecedores.app .
 cd ../../..
 echo "Gerado: $(pwd)/fornecedores.app"
