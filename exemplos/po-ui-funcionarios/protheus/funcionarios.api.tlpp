@@ -147,13 +147,20 @@ Return oRest:setStatusResponse(200, jResponse:toJson())
 User Function getFuncionario() as Logical
   Local jParams := oRest:getPathParamsRequest() as Json
   Local cId     := jParams["id"] as Character
+  Local cJson   := "" as Character
 
-  If !PosicionaSRA(cId)
-    Return oRest:setStatusResponse(404, BuildError("404", "Funcionario nao encontrado", "Matricula: " + cId))
-  EndIf
+  Try
+    If !PosicionaSRA(cId)
+      Return oRest:setStatusResponse(404, BuildError("404", "Funcionario nao encontrado", "Matricula: " + cId))
+    EndIf
+    cJson := FuncionarioSRA():toJson()
+  Catch oError
+    FWLogMsg("ERROR", , "REST", "getFuncionario", , "01", oError:Description, 0, 0, {})
+    Return oRest:setStatusResponse(500, BuildError("500", "Erro ao consultar funcionario", oError:Description))
+  EndTry
 
   oRest:setKeyHeaderResponse("Content-Type", "application/json")
-Return oRest:setStatusResponse(200, FuncionarioSRA():toJson())
+Return oRest:setStatusResponse(200, cJson)
 
 //-------------------------------------------------------------------
 // PUT /custom/v1/funcionarios/:id
@@ -178,9 +185,16 @@ User Function updateFuncionario() as Logical
     Return oRest:setStatusResponse(400, BuildError("400", cResult, cResult))
   EndIf
 
-  PosicionaSRA(cId)
+  Try
+    PosicionaSRA(cId)
+    cResult := FuncionarioSRA():toJson()
+  Catch oError
+    FWLogMsg("ERROR", , "REST", "updateFuncionario", , "01", oError:Description, 0, 0, {})
+    Return oRest:setStatusResponse(500, BuildError("500", "Alterado, mas houve erro ao reler o funcionario", oError:Description))
+  EndTry
+
   oRest:setKeyHeaderResponse("Content-Type", "application/json")
-Return oRest:setStatusResponse(200, FuncionarioSRA():toJson())
+Return oRest:setStatusResponse(200, cResult)
 
 //-------------------------------------------------------------------
 // Altera o SRA posicionado pela rotina automatica do GPEA010.
