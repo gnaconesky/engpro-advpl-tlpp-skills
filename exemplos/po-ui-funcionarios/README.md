@@ -70,10 +70,14 @@ Como nos fornecedores:
 Rode com `npm start` e abra http://localhost:4200.
 
 ### 3. Dentro do Protheus
+Na pasta do projeto (`funcionarios-app`):
 ```bash
-sh empacotar-protheus.sh                     # gera funcionarios.app (REST padrão: http://127.0.0.1:4004/rest)
-cp funcionarios.app ~/Projects/"WS Totvs"/Fornecedores-app/   # ou a pasta onde compila
+sh empacotar-protheus.sh
+cp funcionarios.app ~/Projects/"WS Totvs"/Fornecedores-app/
 ```
+O script usa o REST `http://127.0.0.1:4004/rest`; para outro endereço, passe-o como parâmetro
+(`sh empacotar-protheus.sh http://servidor:porta/rest`). Troque a pasta do `cp` pela pasta onde você compila.
+
 1. Compile `funcionarios.app` e `protheus/FUNCPOUI.prw`.
 2. No Configurador, adicione **`U_FUNCPOUI`** ao menu do **SIGAGPE**.
 3. Entre no SIGAGPE por uma aba nova do WebApp e chame a rotina.
