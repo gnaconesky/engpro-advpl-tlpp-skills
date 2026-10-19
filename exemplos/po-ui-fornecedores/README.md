@@ -223,13 +223,23 @@ O nome do arquivo é o nome do app que o `FwCallApp` vai abrir.
    autenticada, com a empresa e a filial da sessão.
 
 ### 5.4 Pré-requisitos e conferência
-- O `FwCallApp` usa o **REST do próprio AppServer** para servir o app e as APIs. No seu
-  caso é o REST da porta 4004, que já atende a API de fornecedores.
-- Em **Docker**, o endereço do REST que o Protheus informa ao app é o de dentro do
-  contêiner. Se a porta publicada for diferente da interna (ex.: `-p 4004:8080`), o app
-  não encontra a API. Use a mesma porta dos dois lados (`-p 4004:4004`).
-- A lib e o binário do Protheus precisam ser recentes o bastante para o `FwCallApp`;
-  confira a página **"FwCallApp - Abrindo aplicativos Web no Protheus"** na TDN.
+- Dentro do Protheus o app é servido pela **porta do WebApp** (ex.: `127.0.0.1:4002/app-root/...`),
+  e a API fica no **REST** (ex.: porta 4004). Por isso o `empacotar-protheus.sh` grava no pacote
+  o endereço completo do REST: `sh empacotar-protheus.sh http://127.0.0.1:4004/rest`
+  (esse é o padrão). Use o endereço como o **navegador** enxerga o REST.
+- Como são portas diferentes, o REST precisa liberar **CORS**. As chaves vão na seção do
+  `URL=/rest` (no exemplo, `[HTTPURI]`), não na seção da porta:
+  ```ini
+  [HTTPURI]
+  URL=/rest
+  CORSEnable=1
+  AllowOrigin=*
+  ```
+  Reinicie o AppServer depois de alterar.
+- O `.app` precisa ter uma pasta raiz com o nome do app (`fornecedores/`); o script já gera assim.
+  Para ver o que foi extraído: `http-root/app-root/fornecedores_env_<environment>` no RootPath.
+- Se mudar o `.app`, apague a pasta extraída antiga antes de reabrir e use uma **aba nova**
+  do WebApp (a configuração fica guardada no `sessionStorage` da aba).
 
 ### 5.5 Atualizar a tela depois
 Altere o código, rode `sh empacotar-protheus.sh` de novo e recompile o `fornecedores.app`.
@@ -252,5 +262,7 @@ Nesse caso, troque a autenticação Basic por **OAuth2** (`POST /rest/api/oauth2
 | Lista vazia, mas existem fornecedores | `tenantId` aponta para outra empresa/filial |
 | Erro citando `SA2MASTER` | O ID do submodelo do MATA020 é diferente na sua release; confira em `ModelDef` |
 | `FwCallApp` abre tela em branco | O `.app` foi gerado sem `--base-href ./` (use o `empacotar-protheus.sh`) ou o nome do `.app` difere do usado no `FwCallApp` |
-| Dentro do Protheus a lista dá erro 404/conexão | REST do AppServer diferente do que atende a API, ou porta do Docker mapeada para outro número |
+| Dentro do Protheus a lista dá erro 404 em `...:4002/rest/...` | O pacote foi gerado com `api_baseUrl` relativo; gere de novo com `empacotar-protheus.sh` |
+| Dentro do Protheus: "Sem resposta do servidor REST" | Falta CORS no REST (`CORSEnable=1` e `AllowOrigin` na seção `[HTTPURI]`) |
+| `FwCallApp`: "Não foi possível extrair o arquivo" | O `.app` não tem a pasta raiz com o nome do app; gere com o `empacotar-protheus.sh` |
 | Telas em inglês ("Save", "Cancel") | O PO-UI segue o idioma do navegador; em um navegador pt-BR aparecem em português |

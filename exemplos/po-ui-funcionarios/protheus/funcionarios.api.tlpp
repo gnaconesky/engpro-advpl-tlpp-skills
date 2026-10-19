@@ -1,0 +1,326 @@
+#include "tlpp-core.th"
+#include "totvs.ch"
+
+Namespace custom.funcionarios
+
+//-------------------------------------------------------------------
+// API REST de Funcionarios (SRA) consumida pela tela PO-UI.
+// Escopo: consulta e alteracao de dados de contato/endereco.
+// Inclusao, demissao e exclusao continuam nas rotinas do SIGAGPE.
+//
+// Rotas (base: http://<servidor>:<porta>/rest):
+//   GET /custom/v1/funcionarios        lista paginada (page, pageSize, search, demitidos)
+//   GET /custom/v1/funcionarios/:id    um funcionario (id = RA_MAT)
+//   PUT /custom/v1/funcionarios/:id    altera os campos editaveis
+//
+// A filial vem do header "tenantId" (empresa,filial).
+// A alteracao usa a rotina automatica do GPEA010, para respeitar as
+// validacoes do cadastro e gerar os eventos do eSocial.
+//-------------------------------------------------------------------
+
+//-------------------------------------------------------------------
+// Campos expostos: {campo SRA, propriedade JSON, editavel, tipo}
+// Campos que nao existirem no dicionario do ambiente sao ignorados.
+//-------------------------------------------------------------------
+Static Function CamposSRA() as Array
+Return { ;
+  {"RA_MAT",     "matricula",    .F., "C"}, ;
+  {"RA_NOME",    "nome",         .F., "C"}, ;
+  {"RA_CIC",     "cpf",          .F., "C"}, ;
+  {"RA_NASC",    "nascimento",   .F., "D"}, ;
+  {"RA_ADMISSA", "admissao",     .F., "D"}, ;
+  {"RA_SITFOLH", "situacao",     .F., "C"}, ;
+  {"RA_CODFUNC", "funcao",       .F., "C"}, ;
+  {"RA_CC",      "centroCusto",  .F., "C"}, ;
+  {"RA_EMAIL",   "email",        .T., "C"}, ;
+  {"RA_DDDFONE", "dddTelefone",  .T., "C"}, ;
+  {"RA_TELEFON", "telefone",     .T., "C"}, ;
+  {"RA_DDDCELU", "dddCelular",   .T., "C"}, ;
+  {"RA_NUMCELU", "celular",      .T., "C"}, ;
+  {"RA_CEP",     "cep",          .T., "C"}, ;
+  {"RA_ENDEREC", "endereco",     .T., "C"}, ;
+  {"RA_NUMENDE", "numero",       .T., "C"}, ;
+  {"RA_COMPLEM", "complemento",  .T., "C"}, ;
+  {"RA_BAIRRO",  "bairro",       .T., "C"}, ;
+  {"RA_MUNICIP", "municipio",    .T., "C"}, ;
+  {"RA_ESTADO",  "estado",       .T., "C"}  ;
+}
+
+//-------------------------------------------------------------------
+// GET /custom/v1/funcionarios
+//-------------------------------------------------------------------
+@Get(endpoint="/custom/v1/funcionarios", description="Lista funcionarios com paginacao")
+User Function listFuncionarios() as Logical
+  Local jQuery     := oRest:getQueryRequest() as Json
+  Local nPage      := 1 as Numeric
+  Local nPageSize  := 20 as Numeric
+  Local cSearch    := "" as Character
+  Local lDemitidos := .F. as Logical
+  Local aCampos    := CamposDisponiveis() as Array
+  Local cQuery     := "" as Character
+  Local cAlias     := "" as Character
+  Local oStatement as Object
+  Local aItems     := {} as Array
+  Local nSkip      := 0 as Numeric
+  Local nParam     := 1 as Numeric
+  Local nI         := 0 as Numeric
+  Local jResponse  := JsonObject():New() as Json
+
+  If jQuery <> Nil
+    If jQuery:HasProperty("page")
+      nPage := Max(Val(cValToChar(jQuery["page"])), 1)
+    EndIf
+    If jQuery:HasProperty("pageSize")
+      nPageSize := Min(Max(Val(cValToChar(jQuery["pageSize"])), 1), 100)
+    EndIf
+    If jQuery:HasProperty("search")
+      cSearch := AllTrim(Upper(cValToChar(jQuery["search"])))
+    EndIf
+    If jQuery:HasProperty("demitidos")
+      lDemitidos := Lower(cValToChar(jQuery["demitidos"])) == "true"
+    EndIf
+  EndIf
+
+  cQuery := "SELECT "
+  For nI := 1 To Len(aCampos)
+    cQuery += "SRA." + aCampos[nI][1] + ", "
+  Next nI
+  cQuery += "COALESCE(SRJ.RJ_DESC, ' ') RJ_DESC, COALESCE(CTT.CTT_DESC01, ' ') CTT_DESC01 "
+  cQuery += "FROM " + RetSQLName("SRA") + " SRA "
+  cQuery += "LEFT JOIN " + RetSQLName("SRJ") + " SRJ ON SRJ.RJ_FILIAL = ? "
+  cQuery += "AND SRJ.RJ_FUNCAO = SRA.RA_CODFUNC AND SRJ.D_E_L_E_T_ = ' ' "
+  cQuery += "LEFT JOIN " + RetSQLName("CTT") + " CTT ON CTT.CTT_FILIAL = ? "
+  cQuery += "AND CTT.CTT_CUSTO = SRA.RA_CC AND CTT.D_E_L_E_T_ = ' ' "
+  cQuery += "WHERE SRA.D_E_L_E_T_ = ' ' "
+  cQuery += "AND SRA.RA_FILIAL = ? "
+  If !lDemitidos
+    cQuery += "AND SRA.RA_SITFOLH <> 'D' "
+  EndIf
+  If !Empty(cSearch)
+    cQuery += "AND (SRA.RA_NOME LIKE ? OR SRA.RA_MAT LIKE ? OR SRA.RA_CIC LIKE ?) "
+  EndIf
+  cQuery += "ORDER BY SRA.RA_NOME"
+
+  Try
+    oStatement := FWExecStatement():New(ChangeQuery(cQuery))
+    oStatement:SetString(nParam++, FWxFilial("SRJ"))
+    oStatement:SetString(nParam++, FWxFilial("CTT"))
+    oStatement:SetString(nParam++, FWxFilial("SRA"))
+    If !Empty(cSearch)
+      oStatement:SetString(nParam++, "%" + cSearch + "%")
+      oStatement:SetString(nParam++, "%" + cSearch + "%")
+      oStatement:SetString(nParam++, "%" + cSearch + "%")
+    EndIf
+    cAlias := oStatement:OpenAlias()
+
+    // Paginacao portavel entre bancos: pula as paginas anteriores
+    While nSkip < (nPage - 1) * nPageSize .And. !(cAlias)->(Eof())
+      (cAlias)->(DBSkip())
+      nSkip++
+    EndDo
+
+    While !(cAlias)->(Eof()) .And. Len(aItems) < nPageSize
+      aAdd(aItems, FuncionarioToJson(cAlias, aCampos, AllTrim((cAlias)->RJ_DESC), AllTrim((cAlias)->CTT_DESC01), .F.))
+      (cAlias)->(DBSkip())
+    EndDo
+
+    jResponse["hasNext"] := !(cAlias)->(Eof())
+    (cAlias)->(DBCloseArea())
+    oStatement:Destroy()
+  Catch oError
+    If !Empty(cAlias) .And. Select(cAlias) > 0
+      (cAlias)->(DBCloseArea())
+    EndIf
+    FWLogMsg("ERROR", , "REST", "listFuncionarios", , "01", oError:Description, 0, 0, {})
+    Return oRest:setStatusResponse(500, BuildError("500", "Erro ao listar funcionarios", oError:Description))
+  EndTry
+
+  jResponse["items"] := aItems
+
+  oRest:setKeyHeaderResponse("Content-Type", "application/json")
+Return oRest:setStatusResponse(200, jResponse:toJson())
+
+//-------------------------------------------------------------------
+// GET /custom/v1/funcionarios/:id
+//-------------------------------------------------------------------
+@Get(endpoint="/custom/v1/funcionarios/:id", description="Retorna um funcionario")
+User Function getFuncionario() as Logical
+  Local jParams := oRest:getPathParamsRequest() as Json
+  Local cId     := jParams["id"] as Character
+
+  If !PosicionaSRA(cId)
+    Return oRest:setStatusResponse(404, BuildError("404", "Funcionario nao encontrado", "Matricula: " + cId))
+  EndIf
+
+  oRest:setKeyHeaderResponse("Content-Type", "application/json")
+Return oRest:setStatusResponse(200, FuncionarioSRA():toJson())
+
+//-------------------------------------------------------------------
+// PUT /custom/v1/funcionarios/:id
+//-------------------------------------------------------------------
+@Put(endpoint="/custom/v1/funcionarios/:id", description="Altera contato e endereco do funcionario")
+User Function updateFuncionario() as Logical
+  Local jParams := oRest:getPathParamsRequest() as Json
+  Local cId     := jParams["id"] as Character
+  Local jBody   := JsonObject():New() as Json
+  Local cResult := "" as Character
+
+  If jBody:fromJson(oRest:getBodyRequest()) <> Nil
+    Return oRest:setStatusResponse(400, BuildError("400", "JSON invalido", "Corpo da requisicao nao e um JSON valido"))
+  EndIf
+
+  If !PosicionaSRA(cId)
+    Return oRest:setStatusResponse(404, BuildError("404", "Funcionario nao encontrado", "Matricula: " + cId))
+  EndIf
+
+  cResult := AlteraFuncionario(jBody)
+  If !Empty(cResult)
+    Return oRest:setStatusResponse(400, BuildError("400", cResult, cResult))
+  EndIf
+
+  PosicionaSRA(cId)
+  oRest:setKeyHeaderResponse("Content-Type", "application/json")
+Return oRest:setStatusResponse(200, FuncionarioSRA():toJson())
+
+//-------------------------------------------------------------------
+// Altera o SRA posicionado pela rotina automatica do GPEA010.
+// Envia somente os campos editaveis presentes no JSON.
+// Retorna "" em caso de sucesso ou a mensagem de erro da rotina.
+//-------------------------------------------------------------------
+Static Function AlteraFuncionario(jBody as Json) as Character
+  Local aCampos := CamposDisponiveis() as Array
+  Local aCabec  := {} as Array
+  Local aLog    := {} as Array
+  Local cErro   := "" as Character
+  Local nI      := 0 as Numeric
+
+  Private lMsErroAuto    := .F.
+  Private lMsHelpAuto    := .T.
+  Private lAutoErrNoFile := .T.
+
+  aAdd(aCabec, {"RA_FILIAL", SRA->RA_FILIAL, Nil})
+  aAdd(aCabec, {"RA_MAT",    SRA->RA_MAT,    Nil})
+
+  For nI := 1 To Len(aCampos)
+    If aCampos[nI][3] .And. jBody:HasProperty(aCampos[nI][2])
+      aAdd(aCabec, {aCampos[nI][1], PadR(AllTrim(cValToChar(jBody[aCampos[nI][2]])), TamSX3(aCampos[nI][1])[1]), Nil})
+    EndIf
+  Next nI
+
+  If Len(aCabec) == 2
+    Return "Nenhum campo editavel informado"
+  EndIf
+
+  Try
+    MSExecAuto({|x, y, k, w| GPEA010(x, y, k, w)}, Nil, Nil, aCabec, 4)
+
+    If lMsErroAuto
+      aLog := GetAutoGRLog()
+      For nI := 1 To Len(aLog)
+        If !Empty(aLog[nI])
+          cErro += AllTrim(aLog[nI]) + " "
+        EndIf
+      Next nI
+      cErro := AllTrim(cErro)
+      If Empty(cErro)
+        cErro := "Nao foi possivel alterar o funcionario"
+      EndIf
+    EndIf
+  Catch oError
+    cErro := oError:Description
+    FWLogMsg("ERROR", , "REST", "AlteraFuncionario", , "01", cErro, 0, 0, {})
+  EndTry
+
+Return cErro
+
+//-------------------------------------------------------------------
+// Campos de CamposSRA() que existem no dicionario deste ambiente.
+//-------------------------------------------------------------------
+Static Function CamposDisponiveis() as Array
+  Local aTodos := CamposSRA() as Array
+  Local aCampos := {} as Array
+  Local nI := 0 as Numeric
+
+  DbSelectArea("SRA")
+  For nI := 1 To Len(aTodos)
+    If SRA->(FieldPos(aTodos[nI][1])) > 0
+      aAdd(aCampos, aTodos[nI])
+    EndIf
+  Next nI
+
+Return aCampos
+
+//-------------------------------------------------------------------
+// Posiciona o SRA pela matricula na filial do tenant.
+//-------------------------------------------------------------------
+Static Function PosicionaSRA(cMat as Character) as Logical
+  DbSelectArea("SRA")
+  SRA->(DbSetOrder(1)) // RA_FILIAL + RA_MAT
+Return SRA->(DbSeek(FWxFilial("SRA") + PadR(cMat, TamSX3("RA_MAT")[1])))
+
+//-------------------------------------------------------------------
+// JSON completo do SRA posicionado (inclui descricoes de funcao e CC).
+//-------------------------------------------------------------------
+Static Function FuncionarioSRA() as Json
+  Local cFuncao := AllTrim(Posicione("SRJ", 1, FWxFilial("SRJ") + SRA->RA_CODFUNC, "RJ_DESC")) as Character
+  Local cCC     := AllTrim(Posicione("CTT", 1, FWxFilial("CTT") + SRA->RA_CC, "CTT_DESC01")) as Character
+Return FuncionarioToJson("SRA", CamposDisponiveis(), cFuncao, cCC, .T.)
+
+//-------------------------------------------------------------------
+// Monta o JSON a partir do alias (SRA ou query).
+// lDetalhe: inclui CPF (dado pessoal, nao vai na lista).
+//-------------------------------------------------------------------
+Static Function FuncionarioToJson(cAlias as Character, aCampos as Array, cDescFuncao as Character, ;
+                                  cDescCC as Character, lDetalhe as Logical) as Json
+  Local jItem  := JsonObject():New() as Json
+  Local xValor
+  Local nI     := 0 as Numeric
+
+  For nI := 1 To Len(aCampos)
+    If aCampos[nI][1] == "RA_CIC" .And. !lDetalhe
+      Loop
+    EndIf
+    xValor := (cAlias)->(FieldGet(FieldPos(aCampos[nI][1])))
+    If aCampos[nI][4] == "D"
+      jItem[aCampos[nI][2]] := DataIso(xValor)
+    Else
+      jItem[aCampos[nI][2]] := AllTrim(cValToChar(xValor))
+    EndIf
+  Next nI
+
+  jItem["id"]               := jItem["matricula"]
+  jItem["funcaoDescricao"]  := cDescFuncao
+  jItem["centroCustoDescricao"] := cDescCC
+
+Return jItem
+
+//-------------------------------------------------------------------
+// Data no formato ISO (AAAA-MM-DD) aceito pelo PO-UI.
+// Na tabela o campo e Date; na query vem como texto AAAAMMDD.
+//-------------------------------------------------------------------
+Static Function DataIso(xValor) as Character
+  Local cData := "" as Character
+
+  If ValType(xValor) == "D"
+    cData := DtoS(xValor)
+  Else
+    cData := AllTrim(cValToChar(xValor))
+  EndIf
+
+  If Len(cData) <> 8
+    Return ""
+  EndIf
+
+Return SubStr(cData, 1, 4) + "-" + SubStr(cData, 5, 2) + "-" + SubStr(cData, 7, 2)
+
+//-------------------------------------------------------------------
+// Erro no padrao TTALK. O PO-UI exibe o campo "message" automaticamente.
+//-------------------------------------------------------------------
+Static Function BuildError(cCode as Character, cMessage as Character, cDetail as Character) as Character
+  Local jError := JsonObject():New() as Json
+
+  jError["code"]            := cCode
+  jError["message"]         := cMessage
+  jError["detailedMessage"] := cDetail
+
+Return jError:toJson()
