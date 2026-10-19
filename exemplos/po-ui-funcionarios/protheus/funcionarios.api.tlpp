@@ -148,12 +148,15 @@ User Function getFuncionario() as Logical
   Local jParams := oRest:getPathParamsRequest() as Json
   Local cId     := jParams["id"] as Character
   Local cJson   := "" as Character
+  Local jFunc   as Json
 
   Try
     If !PosicionaSRA(cId)
       Return oRest:setStatusResponse(404, BuildError("404", "Funcionario nao encontrado", "Matricula: " + cId))
     EndIf
-    cJson := FuncionarioSRA():toJson()
+    // Atribuir antes de chamar :toJson(); "Funcao():metodo" sem parametros o TLPP le como classe
+    jFunc := FuncionarioSRA()
+    cJson := jFunc:toJson()
   Catch oError
     FWLogMsg("ERROR", , "REST", "getFuncionario", , "01", oError:Description, 0, 0, {})
     Return oRest:setStatusResponse(500, BuildError("500", "Erro ao consultar funcionario", oError:Description))
@@ -171,6 +174,7 @@ User Function updateFuncionario() as Logical
   Local cId     := jParams["id"] as Character
   Local jBody   := JsonObject():New() as Json
   Local cResult := "" as Character
+  Local jFunc   as Json
 
   If jBody:fromJson(oRest:getBodyRequest()) <> Nil
     Return oRest:setStatusResponse(400, BuildError("400", "JSON invalido", "Corpo da requisicao nao e um JSON valido"))
@@ -187,7 +191,8 @@ User Function updateFuncionario() as Logical
 
   Try
     PosicionaSRA(cId)
-    cResult := FuncionarioSRA():toJson()
+    jFunc   := FuncionarioSRA()
+    cResult := jFunc:toJson()
   Catch oError
     FWLogMsg("ERROR", , "REST", "updateFuncionario", , "01", oError:Description, 0, 0, {})
     Return oRest:setStatusResponse(500, BuildError("500", "Alterado, mas houve erro ao reler o funcionario", oError:Description))
